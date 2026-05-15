@@ -100,6 +100,18 @@
   button.danger:hover { background: rgba(255,85,102,0.10); }
   button.icon-only { padding: 8px; }
 
+  /* file inputs hidden via display:none break .click() on Safari and break label
+     keyboard activation — keep them in the layout but visually invisible */
+  .visually-hidden {
+    position: absolute !important;
+    width: 1px; height: 1px;
+    padding: 0; margin: -1px;
+    overflow: hidden; clip: rect(0,0,0,0);
+    white-space: nowrap; border: 0;
+  }
+  label[for="fileInput"] { user-select: none; }
+  label[for="fileInput"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   .kbd {
     font-family: ui-monospace, Menlo, monospace;
     font-size: 11px;
@@ -302,8 +314,8 @@
 
   <div class="group">
     <button id="loadSampleBtn" title="Load a sample slide deck">📄 <span class="hide-sm">Sample</span></button>
-    <button id="loadFileBtn" title="Open a local .html file">📁 <span class="hide-sm">Open</span></button>
-    <input id="fileInput" type="file" accept=".html,text/html" hidden />
+    <label for="fileInput" class="btn" title="Open a local .html file" tabindex="0" role="button">📁 <span class="hide-sm">Open</span></label>
+    <input id="fileInput" type="file" accept=".html,text/html,.htm" class="visually-hidden" />
   </div>
 
   <div class="group">
@@ -599,8 +611,9 @@
   }
 
   // ===== Open file =====
+  // The Open button is a <label for="fileInput"> — clicking it natively opens the
+  // file picker on every browser. No JS click-forwarding needed.
   const fileInput = document.getElementById('fileInput');
-  document.getElementById('loadFileBtn').addEventListener('click', () => fileInput.click());
 
   function loadFile(file) {
     if (!file) return;
@@ -721,7 +734,8 @@
       download();
     } else if (cmd && e.key.toLowerCase() === 'o') {
       e.preventDefault();
-      fileInput.click();
+      // Activate the <label> by simulating a click — labels open file pickers natively
+      document.querySelector('label[for="fileInput"]').click();
     } else if (!cmd && e.key.toLowerCase() === 'e'
                && document.activeElement !== code
                && document.activeElement !== preview) {
