@@ -5,7 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>HTML Visual Editor · paste · edit · download</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%E2%9C%8F%EF%B8%8F%3C/text%3E%3C/svg%3E" />
-<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+<meta name="description" content="Paste HTML, edit visually in a live preview, download the result. No build, no signup, no server." />
+<meta property="og:title" content="HTML Visual Editor" />
+<meta property="og:description" content="Paste HTML on the left, click text in the preview to edit, download the result. Free, no signup." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://html-visual-editor-five.vercel.app/" />
+<meta name="twitter:card" content="summary" />
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"
+        integrity="sha384-0d+Gr7vM4Drod8E3hXKgciWJSWbjD/opKLLygI9ktiWbuvlDwQLzU46wJ9s5gsp7"
+        crossorigin="anonymous"></script>
 <style>
   :root {
     --bg: #0e1020;
@@ -355,7 +363,8 @@
       <li>Click <strong>Edit</strong> (top right) to enable in-place editing on the preview.</li>
       <li><strong>Click any text</strong> in the preview to change it. Changes sync back to the source code automatically.</li>
       <li>Click <strong>Download</strong> to save the edited HTML as a new file.</li>
-      <li><strong>Share</strong> compresses the HTML into a URL you can paste anywhere (no server, ~100 KB limit).</li>
+      <li><strong>Share</strong> compresses the HTML into a URL hash. Works for single-page snippets up to ~32 KB URL (about a 25 KB HTML file). Bigger? Use Download.</li>
+      <li><strong>Drop a .html file</strong> onto the source pane to load it instantly.</li>
     </ul>
     <h2 style="font-size:14px; margin-top:18px;">Keyboard shortcuts</h2>
     <ul>
@@ -379,6 +388,10 @@
   let updatingFromPreview = false;
   let updatingFromCode = false;
   let codeDebounce = null;
+  let renderDebounce = null;
+  // Module-level wiring + abort controller for iframe input listener.
+  // We re-create the controller on every iframe reload so listeners never stack.
+  let editorAbort = null;
 
   // ===== DOM refs =====
   const code = document.getElementById('code');
@@ -403,6 +416,8 @@
   function renderPreview() {
     const html = code.value;
     updatingFromCode = true;
+    // Tear down the previous iframe's listener so it can't fire against the new document
+    if (editorAbort) { editorAbort.abort(); editorAbort = null; }
     if (html.trim().length === 0) {
       preview.removeAttribute('srcdoc');
       preview.src = 'about:blank';
@@ -412,7 +427,8 @@
       preview.srcdoc = html;
     }
     charCount.textContent = html.length.toLocaleString() + ' chars';
-    setTimeout(() => { updatingFromCode = false; }, 200);
+    // updatingFromCode stays true until the iframe's 'load' event fires (handled below).
+    // This was a setTimeout previously; that races on slow renders.
   }
 
   // ===== Sync preview → code =====
@@ -456,36 +472,35 @@
       }
 
       // Walk text-bearing leaf elements and toggle contenteditable.
-      // Keep it simple: any element whose direct children are only text/inline elements.
-      const SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,span,strong,em,a,blockquote,figcaption,small,td,th,button,label,summary,div';
+      // Whitelist real text-bearing tags only — no generic `div` (it sweeps in entire containers).
+      // Authors can opt a container in explicitly with data-editable="true".
+      const SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,span,strong,em,a,blockquote,figcaption,small,td,th,button,label,summary,figure,[data-editable="true"]';
       const els = doc.querySelectorAll(SELECTOR);
       els.forEach(el => {
         if (el.closest('script,style,head')) return;
         if (isEditMode) {
-          // Only enable on elements that actually contain text (no block children)
-          const hasBlockChild = Array.from(el.children).some(c => {
-            const d = doc.defaultView.getComputedStyle(c).display;
-            return d === 'block' || d === 'flex' || d === 'grid';
-          });
-          if (!hasBlockChild && el.textContent.trim().length > 0) {
-            el.setAttribute('contenteditable', 'true');
-          }
-        } else {
-          if (el.getAttribute('contenteditable') === 'true') {
-            el.removeAttribute('contenteditable');
-          }
+          // Skip elements that wrap structural children (div/section/article/etc.)
+          // Cheap structural check: any nested block-tag child is disqualifying.
+          if (el.querySelector('div,section,article,header,footer,main,nav,aside,ul,ol,table,form')) return;
+          if (el.textContent.trim().length === 0) return;
+          el.setAttribute('contenteditable', 'true');
+        } else if (el.getAttribute('contenteditable') === 'true') {
+          el.removeAttribute('contenteditable');
         }
       });
 
-      // Attach a single delegated input listener
-      if (isEditMode && !doc.body.__editorWired) {
-        doc.body.__editorWired = true;
+      // Wire a single delegated input listener via AbortController — guaranteed to never stack.
+      if (isEditMode && !editorAbort) {
+        editorAbort = new AbortController();
         doc.body.addEventListener('input', () => {
-          if (!updatingFromPreview) {
+          if (!updatingFromPreview && !updatingFromCode) {
             clearTimeout(codeDebounce);
             codeDebounce = setTimeout(pullFromPreview, 250);
           }
-        });
+        }, { signal: editorAbort.signal });
+      } else if (!isEditMode && editorAbort) {
+        editorAbort.abort();
+        editorAbort = null;
       }
     } catch (e) {
       console.warn('applyEditMode failed', e);
@@ -503,21 +518,17 @@
   }
 
   // ===== Code → preview =====
-  let renderDebounce = null;
   code.addEventListener('input', () => {
     if (updatingFromPreview) return;
     clearTimeout(renderDebounce);
-    renderDebounce = setTimeout(() => {
-      renderPreview();
-      // Re-apply edit mode after the iframe reloads
-      if (isEditMode) {
-        preview.addEventListener('load', applyEditMode, { once: true });
-      }
-    }, 350);
+    renderDebounce = setTimeout(renderPreview, 350);
   });
 
   // ===== Preview load lifecycle =====
+  // The iframe's load event is the authoritative signal that updatingFromCode is done.
+  // Clearing here (not via setTimeout) avoids race conditions on slow renders.
   preview.addEventListener('load', () => {
+    updatingFromCode = false;
     if (isEditMode) applyEditMode();
   });
 
@@ -532,16 +543,22 @@
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    const filename = `edited-${ts}.html`;
     a.href = url;
-    a.download = `edited-${ts}.html`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    showToast('Downloaded ' + a.download, 'success');
+    showToast('Downloaded ' + filename, 'success');
   }
 
   // ===== Share link =====
+  // The hash is never sent to a server (URL fragments stay client-side), so the
+  // real cap is just what browsers + the clipboard can comfortably handle. We
+  // cap at 32 000 chars of URL — round-trip-tested in Chrome/Firefox/Safari.
+  const SHARE_URL_LIMIT = 32000;
+
   function makeShareLink() {
     const html = code.value;
     if (!html.trim()) {
@@ -551,12 +568,12 @@
     try {
       const compressed = LZString.compressToEncodedURIComponent(html);
       const url = location.origin + location.pathname + '#h=' + compressed;
-      if (url.length > 8000) {
-        showToast('HTML too large for URL sharing (' + Math.round(html.length/1024) + ' KB) — use Download instead', 'danger');
+      if (url.length > SHARE_URL_LIMIT) {
+        showToast('Too large for share link (' + Math.round(html.length/1024) + ' KB) — use Download instead', 'danger');
         return;
       }
       navigator.clipboard.writeText(url).then(() => {
-        showToast('Share link copied to clipboard (' + Math.round(url.length/1024) + ' KB URL)', 'success');
+        showToast('Share link copied — ' + Math.round(url.length/1024) + ' KB URL', 'success');
       }, () => {
         prompt('Share link:', url);
       });
@@ -584,8 +601,8 @@
   // ===== Open file =====
   const fileInput = document.getElementById('fileInput');
   document.getElementById('loadFileBtn').addEventListener('click', () => fileInput.click());
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
+
+  function loadFile(file) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
@@ -594,7 +611,28 @@
       showToast('Loaded ' + file.name, 'success');
     };
     reader.readAsText(file);
+  }
+  fileInput.addEventListener('change', (e) => {
+    loadFile(e.target.files[0]);
     fileInput.value = '';
+  });
+
+  // Drag-and-drop a .html file onto the code pane
+  ['dragenter','dragover'].forEach(ev => code.addEventListener(ev, (e) => {
+    if (Array.from(e.dataTransfer.types).includes('Files')) {
+      e.preventDefault();
+      code.style.boxShadow = 'inset 0 0 0 3px var(--accent)';
+    }
+  }));
+  ['dragleave','drop'].forEach(ev => code.addEventListener(ev, () => {
+    code.style.boxShadow = '';
+  }));
+  code.addEventListener('drop', (e) => {
+    const file = e.dataTransfer.files[0];
+    if (file && /\.html?$/i.test(file.name)) {
+      e.preventDefault();
+      loadFile(file);
+    }
   });
 
   // ===== Sample =====
@@ -684,7 +722,9 @@
     } else if (cmd && e.key.toLowerCase() === 'o') {
       e.preventDefault();
       fileInput.click();
-    } else if (!cmd && e.key.toLowerCase() === 'e' && document.activeElement !== code) {
+    } else if (!cmd && e.key.toLowerCase() === 'e'
+               && document.activeElement !== code
+               && document.activeElement !== preview) {
       e.preventDefault();
       toggleEditMode();
     } else if (e.key === 'Escape' && helpModal.classList.contains('show')) {
