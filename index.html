@@ -1,0 +1,715 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>HTML Visual Editor · paste · edit · download</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ctext y='20' font-size='20'%3E%E2%9C%8F%EF%B8%8F%3C/text%3E%3C/svg%3E" />
+<script src="https://cdn.jsdelivr.net/npm/lz-string@1.5.0/libs/lz-string.min.js"></script>
+<style>
+  :root {
+    --bg: #0e1020;
+    --panel: #15182e;
+    --panel-2: #1c2040;
+    --border: #2a2f55;
+    --text: #e6e8ff;
+    --text-dim: #9aa0c8;
+    --accent: #6f7aff;
+    --accent-2: #ffb700;
+    --success: #2ecc71;
+    --danger: #ff5566;
+    --radius: 10px;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ===== Top bar ===== */
+  header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    z-index: 10;
+  }
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  header h1 .badge {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    background: var(--accent);
+    color: #fff;
+    padding: 3px 8px;
+    border-radius: 999px;
+  }
+  header .spacer { flex: 1; }
+  header .group { display: flex; gap: 6px; align-items: center; }
+
+  button, .btn {
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    padding: 8px 14px;
+    border-radius: var(--radius);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: background 120ms ease, border-color 120ms ease, transform 60ms ease;
+    white-space: nowrap;
+  }
+  button:hover, .btn:hover { background: #232853; border-color: #3a4078; }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover { background: #5a66e6; border-color: #5a66e6; }
+  button.success { background: var(--success); border-color: var(--success); color: #08220f; }
+  button.success:hover { background: #25b863; border-color: #25b863; }
+  button.danger { background: var(--panel-2); color: var(--danger); border-color: rgba(255,85,102,0.4); }
+  button.danger:hover { background: rgba(255,85,102,0.10); }
+  button.icon-only { padding: 8px; }
+
+  .kbd {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+    background: rgba(255,255,255,0.08);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text-dim);
+  }
+
+  /* ===== Tabs (mobile) ===== */
+  .tabs {
+    display: none;
+    gap: 4px;
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+  }
+  .tabs button { flex: 1; }
+  .tabs button.active { background: var(--accent); border-color: var(--accent); }
+
+  /* ===== Workspace ===== */
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 6px 1fr;
+    min-height: 0;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    background: var(--panel);
+    overflow: hidden;
+  }
+  .pane-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-dim);
+  }
+  .pane-head .right { display: flex; gap: 6px; align-items: center; font-weight: 500; text-transform: none; letter-spacing: 0; }
+  .pane-body { flex: 1; min-height: 0; position: relative; }
+
+  /* Code editor (left) */
+  #code {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    padding: 16px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.55;
+    resize: none;
+    outline: none;
+    tab-size: 2;
+    white-space: pre;
+    overflow: auto;
+  }
+  #code::placeholder { color: var(--text-dim); }
+
+  /* Splitter */
+  .splitter {
+    background: var(--border);
+    cursor: col-resize;
+    position: relative;
+    transition: background 120ms ease;
+  }
+  .splitter:hover, .splitter.dragging { background: var(--accent); }
+  .splitter::after {
+    content: "";
+    position: absolute;
+    inset: 0 -3px;
+  }
+
+  /* Preview frame (right) */
+  #preview {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #fff;
+  }
+  .pane-preview .pane-body { background: #1a1d33; }
+
+  /* Edit-mode indicator */
+  .edit-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: rgba(154,160,200,0.14);
+    color: var(--text-dim);
+  }
+  .edit-state.on { background: rgba(46,204,113,0.16); color: var(--success); }
+  .edit-state .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--text-dim);
+  }
+  .edit-state.on .dot { background: var(--success); box-shadow: 0 0 8px var(--success); }
+
+  /* Toast */
+  .toast {
+    position: fixed;
+    bottom: 20px; left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: var(--radius);
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease, transform 180ms ease;
+    z-index: 100;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  .toast.success { border-color: var(--success); }
+  .toast.danger { border-color: var(--danger); }
+
+  /* Welcome / empty state */
+  .empty-state {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: var(--text-dim);
+    pointer-events: none;
+    padding: 32px;
+  }
+  .empty-state .icon { font-size: 40px; margin-bottom: 14px; }
+  .empty-state h3 { color: var(--text); margin: 0 0 8px; font-size: 18px; }
+  .empty-state p { margin: 0; max-width: 400px; line-height: 1.5; }
+
+  /* Help modal */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 24px;
+  }
+  .modal-backdrop.show { display: flex; }
+  .modal {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    max-width: 540px;
+    width: 100%;
+    color: var(--text);
+  }
+  .modal h2 { margin: 0 0 14px; font-size: 20px; }
+  .modal ul { margin: 0 0 18px; padding-left: 22px; line-height: 1.7; font-size: 14px; }
+  .modal ul li { margin-bottom: 4px; }
+  .modal .modal-foot { display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* Responsive */
+  @media (max-width: 820px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 1fr 1fr; }
+    .splitter { display: none; }
+    .tabs { display: flex; }
+    main .pane { display: none; }
+    main .pane.active { display: flex; }
+    header h1 .badge { display: none; }
+    header .group .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>✏️ HTML Visual Editor <span class="badge">v1</span></h1>
+  <div class="spacer"></div>
+
+  <div class="group">
+    <button id="loadSampleBtn" title="Load a sample slide deck">📄 <span class="hide-sm">Sample</span></button>
+    <button id="loadFileBtn" title="Open a local .html file">📁 <span class="hide-sm">Open</span></button>
+    <input id="fileInput" type="file" accept=".html,text/html" hidden />
+  </div>
+
+  <div class="group">
+    <button id="downloadBtn" class="primary" title="Download the edited HTML">⬇ Download</button>
+    <button id="shareBtn" title="Copy a shareable link (compressed in URL)">🔗 <span class="hide-sm">Share</span></button>
+  </div>
+
+  <button id="helpBtn" title="Help and keyboard shortcuts">?</button>
+</header>
+
+<div class="tabs" role="tablist">
+  <button id="tabCode" class="active">Code</button>
+  <button id="tabPreview">Preview</button>
+</div>
+
+<main>
+  <section class="pane pane-code active" data-pane="code">
+    <div class="pane-head">
+      <span>HTML source</span>
+      <div class="right">
+        <span class="kbd" id="charCount">0 chars</span>
+      </div>
+    </div>
+    <div class="pane-body">
+      <textarea id="code" spellcheck="false" placeholder="Paste your HTML here, or click Sample / Open above…"></textarea>
+    </div>
+  </section>
+
+  <div class="splitter" id="splitter" aria-hidden="true"></div>
+
+  <section class="pane pane-preview" data-pane="preview">
+    <div class="pane-head">
+      <span>Preview · click any text to edit</span>
+      <div class="right">
+        <span class="edit-state" id="editState"><span class="dot"></span><span id="editStateLabel">Editing off</span></span>
+        <button id="editToggleBtn" title="Toggle edit mode (E)">✏ Edit</button>
+      </div>
+    </div>
+    <div class="pane-body">
+      <iframe id="preview" sandbox="allow-same-origin allow-scripts allow-popups allow-forms" title="Live preview"></iframe>
+      <div class="empty-state" id="emptyState">
+        <div class="icon">👈</div>
+        <h3>Paste HTML on the left</h3>
+        <p>Then click <strong>Edit</strong> here and start clicking text in the preview to change it. Hit <strong>Download</strong> when you're done.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<div class="modal-backdrop" id="helpModal">
+  <div class="modal">
+    <h2>How it works</h2>
+    <ul>
+      <li><strong>Paste HTML</strong> on the left, or click <em>Open</em> to load a file from disk.</li>
+      <li>Click <strong>Edit</strong> (top right) to enable in-place editing on the preview.</li>
+      <li><strong>Click any text</strong> in the preview to change it. Changes sync back to the source code automatically.</li>
+      <li>Click <strong>Download</strong> to save the edited HTML as a new file.</li>
+      <li><strong>Share</strong> compresses the HTML into a URL you can paste anywhere (no server, ~100 KB limit).</li>
+    </ul>
+    <h2 style="font-size:14px; margin-top:18px;">Keyboard shortcuts</h2>
+    <ul>
+      <li><span class="kbd">E</span> &nbsp; Toggle edit mode (when preview is focused)</li>
+      <li><span class="kbd">Cmd/Ctrl + S</span> &nbsp; Download</li>
+      <li><span class="kbd">Cmd/Ctrl + O</span> &nbsp; Open file</li>
+    </ul>
+    <p style="font-size:12px; color:var(--text-dim); margin:14px 0 18px;">
+      Edits run entirely in your browser. Nothing is uploaded. External images, fonts, and stylesheets referenced by relative paths won't load in the preview — they will work again once you download the file back into its folder.
+    </p>
+    <div class="modal-foot">
+      <button id="helpCloseBtn" class="primary">Got it</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ===== State =====
+  let isEditMode = false;
+  let updatingFromPreview = false;
+  let updatingFromCode = false;
+  let codeDebounce = null;
+
+  // ===== DOM refs =====
+  const code = document.getElementById('code');
+  const preview = document.getElementById('preview');
+  const emptyState = document.getElementById('emptyState');
+  const editToggleBtn = document.getElementById('editToggleBtn');
+  const editState = document.getElementById('editState');
+  const editStateLabel = document.getElementById('editStateLabel');
+  const charCount = document.getElementById('charCount');
+  const toast = document.getElementById('toast');
+
+  // ===== Toast =====
+  let toastTimer;
+  function showToast(msg, kind = '') {
+    clearTimeout(toastTimer);
+    toast.textContent = msg;
+    toast.className = 'toast show ' + kind;
+    toastTimer = setTimeout(() => { toast.className = 'toast'; }, 2400);
+  }
+
+  // ===== Render to preview =====
+  function renderPreview() {
+    const html = code.value;
+    updatingFromCode = true;
+    if (html.trim().length === 0) {
+      preview.removeAttribute('srcdoc');
+      preview.src = 'about:blank';
+      emptyState.style.display = 'flex';
+    } else {
+      emptyState.style.display = 'none';
+      preview.srcdoc = html;
+    }
+    charCount.textContent = html.length.toLocaleString() + ' chars';
+    setTimeout(() => { updatingFromCode = false; }, 200);
+  }
+
+  // ===== Sync preview → code =====
+  function pullFromPreview() {
+    if (updatingFromCode) return;
+    try {
+      const doc = preview.contentDocument;
+      if (!doc) return;
+      // Strip our temporary attributes before serialising
+      const clone = doc.documentElement.cloneNode(true);
+      clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+      clone.querySelectorAll('[data-editor-hover]').forEach(el => el.removeAttribute('data-editor-hover'));
+      // Remove our injected editor stylesheet so it doesn't end up in the downloaded HTML
+      clone.querySelectorAll('style[data-editor-style]').forEach(el => el.remove());
+      const serialised = '<!doctype html>\n' + clone.outerHTML;
+      updatingFromPreview = true;
+      code.value = serialised;
+      charCount.textContent = serialised.length.toLocaleString() + ' chars';
+      setTimeout(() => { updatingFromPreview = false; }, 50);
+    } catch (e) {
+      console.warn('pullFromPreview failed', e);
+    }
+  }
+
+  // ===== Edit-mode wiring =====
+  function applyEditMode() {
+    try {
+      const doc = preview.contentDocument;
+      if (!doc || !doc.body) return;
+
+      // Inject helper style once
+      if (!doc.querySelector('style[data-editor-style]')) {
+        const s = doc.createElement('style');
+        s.setAttribute('data-editor-style', '1');
+        s.textContent = `
+          [contenteditable="true"] { outline: none; }
+          [contenteditable="true"]:hover { outline: 2px dashed #6f7aff; outline-offset: 2px; cursor: text; }
+          [contenteditable="true"]:focus { outline: 2px solid #6f7aff; outline-offset: 2px; }
+        `;
+        doc.head.appendChild(s);
+      }
+
+      // Walk text-bearing leaf elements and toggle contenteditable.
+      // Keep it simple: any element whose direct children are only text/inline elements.
+      const SELECTOR = 'h1,h2,h3,h4,h5,h6,p,li,span,strong,em,a,blockquote,figcaption,small,td,th,button,label,summary,div';
+      const els = doc.querySelectorAll(SELECTOR);
+      els.forEach(el => {
+        if (el.closest('script,style,head')) return;
+        if (isEditMode) {
+          // Only enable on elements that actually contain text (no block children)
+          const hasBlockChild = Array.from(el.children).some(c => {
+            const d = doc.defaultView.getComputedStyle(c).display;
+            return d === 'block' || d === 'flex' || d === 'grid';
+          });
+          if (!hasBlockChild && el.textContent.trim().length > 0) {
+            el.setAttribute('contenteditable', 'true');
+          }
+        } else {
+          if (el.getAttribute('contenteditable') === 'true') {
+            el.removeAttribute('contenteditable');
+          }
+        }
+      });
+
+      // Attach a single delegated input listener
+      if (isEditMode && !doc.body.__editorWired) {
+        doc.body.__editorWired = true;
+        doc.body.addEventListener('input', () => {
+          if (!updatingFromPreview) {
+            clearTimeout(codeDebounce);
+            codeDebounce = setTimeout(pullFromPreview, 250);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn('applyEditMode failed', e);
+    }
+
+    editState.classList.toggle('on', isEditMode);
+    editStateLabel.textContent = isEditMode ? 'Editing on · click text' : 'Editing off';
+    editToggleBtn.textContent = isEditMode ? '✓ Editing' : '✏ Edit';
+  }
+
+  function toggleEditMode() {
+    isEditMode = !isEditMode;
+    applyEditMode();
+    if (isEditMode) showToast('Edit mode on — click any text in the preview', 'success');
+  }
+
+  // ===== Code → preview =====
+  let renderDebounce = null;
+  code.addEventListener('input', () => {
+    if (updatingFromPreview) return;
+    clearTimeout(renderDebounce);
+    renderDebounce = setTimeout(() => {
+      renderPreview();
+      // Re-apply edit mode after the iframe reloads
+      if (isEditMode) {
+        preview.addEventListener('load', applyEditMode, { once: true });
+      }
+    }, 350);
+  });
+
+  // ===== Preview load lifecycle =====
+  preview.addEventListener('load', () => {
+    if (isEditMode) applyEditMode();
+  });
+
+  // ===== Download =====
+  function download() {
+    const html = code.value;
+    if (!html.trim()) {
+      showToast('Nothing to download yet — paste HTML first', 'danger');
+      return;
+    }
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().replace(/[:.]/g,'-').slice(0,19);
+    a.href = url;
+    a.download = `edited-${ts}.html`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast('Downloaded ' + a.download, 'success');
+  }
+
+  // ===== Share link =====
+  function makeShareLink() {
+    const html = code.value;
+    if (!html.trim()) {
+      showToast('Nothing to share — paste HTML first', 'danger');
+      return;
+    }
+    try {
+      const compressed = LZString.compressToEncodedURIComponent(html);
+      const url = location.origin + location.pathname + '#h=' + compressed;
+      if (url.length > 8000) {
+        showToast('HTML too large for URL sharing (' + Math.round(html.length/1024) + ' KB) — use Download instead', 'danger');
+        return;
+      }
+      navigator.clipboard.writeText(url).then(() => {
+        showToast('Share link copied to clipboard (' + Math.round(url.length/1024) + ' KB URL)', 'success');
+      }, () => {
+        prompt('Share link:', url);
+      });
+    } catch (e) {
+      showToast('Could not create share link', 'danger');
+    }
+  }
+
+  function loadFromHash() {
+    const m = location.hash.match(/#h=(.+)/);
+    if (m) {
+      try {
+        const html = LZString.decompressFromEncodedURIComponent(m[1]);
+        if (html) {
+          code.value = html;
+          renderPreview();
+          showToast('Loaded from shared link', 'success');
+        }
+      } catch (e) {
+        showToast('Could not decode shared link', 'danger');
+      }
+    }
+  }
+
+  // ===== Open file =====
+  const fileInput = document.getElementById('fileInput');
+  document.getElementById('loadFileBtn').addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      code.value = reader.result;
+      renderPreview();
+      showToast('Loaded ' + file.name, 'success');
+    };
+    reader.readAsText(file);
+    fileInput.value = '';
+  });
+
+  // ===== Sample =====
+  const SAMPLE = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Welcome slide</title>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; background: #ffb700; color: #001187;
+           min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 48px; }
+    .stage { max-width: 800px; }
+    h1 { font-size: 64px; line-height: 1.05; margin: 0 0 16px; letter-spacing: -0.02em; }
+    p { font-size: 22px; line-height: 1.45; margin: 0; opacity: 0.85; }
+    .eyebrow { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
+               color: #3750ff; margin-bottom: 24px; }
+  </style>
+</head>
+<body>
+  <div class="stage">
+    <div class="eyebrow">Sample slide</div>
+    <h1>Hello! Click any text to edit it.</h1>
+    <p>This is the live preview. Try clicking this paragraph and changing the words. Your edits appear in the code on the left, and you can download the result as an HTML file.</p>
+  </div>
+</body>
+</html>`;
+
+  document.getElementById('loadSampleBtn').addEventListener('click', () => {
+    code.value = SAMPLE;
+    renderPreview();
+    showToast('Sample loaded — click Edit and try clicking the headline', 'success');
+  });
+
+  // ===== Buttons =====
+  document.getElementById('downloadBtn').addEventListener('click', download);
+  document.getElementById('shareBtn').addEventListener('click', makeShareLink);
+  editToggleBtn.addEventListener('click', toggleEditMode);
+
+  // ===== Help modal =====
+  const helpModal = document.getElementById('helpModal');
+  document.getElementById('helpBtn').addEventListener('click', () => helpModal.classList.add('show'));
+  document.getElementById('helpCloseBtn').addEventListener('click', () => helpModal.classList.remove('show'));
+  helpModal.addEventListener('click', (e) => { if (e.target === helpModal) helpModal.classList.remove('show'); });
+
+  // ===== Tabs (mobile) =====
+  const tabCode = document.getElementById('tabCode');
+  const tabPreview = document.getElementById('tabPreview');
+  function switchTab(which) {
+    document.querySelectorAll('main .pane').forEach(p => p.classList.toggle('active', p.dataset.pane === which));
+    tabCode.classList.toggle('active', which === 'code');
+    tabPreview.classList.toggle('active', which === 'preview');
+  }
+  tabCode.addEventListener('click', () => switchTab('code'));
+  tabPreview.addEventListener('click', () => switchTab('preview'));
+
+  // ===== Splitter (drag to resize) =====
+  const splitter = document.getElementById('splitter');
+  const mainEl = document.querySelector('main');
+  let dragStartX = null;
+  let dragStartCols = null;
+  splitter.addEventListener('pointerdown', (e) => {
+    dragStartX = e.clientX;
+    const rect = mainEl.getBoundingClientRect();
+    dragStartCols = { total: rect.width, leftPx: mainEl.children[0].getBoundingClientRect().width };
+    splitter.classList.add('dragging');
+    splitter.setPointerCapture(e.pointerId);
+  });
+  splitter.addEventListener('pointermove', (e) => {
+    if (dragStartX === null) return;
+    const dx = e.clientX - dragStartX;
+    const newLeft = Math.max(200, Math.min(dragStartCols.total - 200, dragStartCols.leftPx + dx));
+    const leftFr = newLeft;
+    const rightFr = dragStartCols.total - newLeft - 6;
+    mainEl.style.gridTemplateColumns = leftFr + 'px 6px ' + rightFr + 'px';
+  });
+  splitter.addEventListener('pointerup', () => {
+    dragStartX = null;
+    splitter.classList.remove('dragging');
+  });
+
+  // ===== Keyboard shortcuts =====
+  document.addEventListener('keydown', (e) => {
+    const cmd = e.metaKey || e.ctrlKey;
+    if (cmd && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      download();
+    } else if (cmd && e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      fileInput.click();
+    } else if (!cmd && e.key.toLowerCase() === 'e' && document.activeElement !== code) {
+      e.preventDefault();
+      toggleEditMode();
+    } else if (e.key === 'Escape' && helpModal.classList.contains('show')) {
+      helpModal.classList.remove('show');
+    }
+  });
+
+  // ===== Initial state =====
+  loadFromHash();
+  if (!code.value) {
+    charCount.textContent = '0 chars';
+  } else {
+    renderPreview();
+  }
+
+  // Warn before close if there are unsaved edits
+  let initialContent = code.value;
+  window.addEventListener('beforeunload', (e) => {
+    if (code.value && code.value !== initialContent) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+})();
+</script>
+
+</body>
+</html>
